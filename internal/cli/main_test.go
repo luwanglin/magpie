@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yetone/magpie/internal/agent"
 	"github.com/yetone/magpie/internal/testenv"
 )
 
@@ -30,6 +31,9 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	// this machine's agy may have dropped --settings; the agy run tests
+	// are about the flag it used to have, and say so when they aren't
+	agent.AgySettingsFlag = func(string) bool { return true }
 	os.Exit(testenv.RunIn(m, func(string) { testenv.Offline() }))
 }
 

@@ -62,6 +62,10 @@ func TestMain(m *testing.M) {
 	// every OpenCode test's file into OpenCode 2's words; the tests about
 	// it say their own (opencode_v2_test.go)
 	openCodeVersion = func() string { return "" }
+	// nor whether this machine's agy still has --settings: agy 1.4.8
+	// doesn't, and every launch would then hold settings.json; the tests
+	// about that say their own (agy_settings_test.go)
+	AgySettingsFlag = func(string) bool { return true }
 	// a desktop app's Restart never quits or opens one of this machine's
 	// (the Codex app, Claude Desktop, WorkBuddy the developer runs); the
 	// restart tests stand in for each step

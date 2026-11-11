@@ -102,6 +102,9 @@ func psQuote(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + 
 // command is what starts the agent on the gateway at gw with key and
 // model, in PowerShell or a POSIX shell.
 func (l *launchSpec) command(gw, key, model string, powershell bool) string {
+	if l.bin == "agy" && !AgySettingsFlag("agy") {
+		return agyHeldLaunch(gw, key, model, powershell)
+	}
 	var b strings.Builder
 	for _, kv := range l.vars(gw, key) {
 		k, v, _ := strings.Cut(kv, "=")
@@ -136,6 +139,9 @@ func (l *launchSpec) posixHead() string {
 // prog (this magpie) to start the agent; the command on PATH when prog is
 // gone.
 func (l *launchSpec) function(kind, prog string) string {
+	if kind == "powershell" && l.bin == "agy" && !AgySettingsFlag("agy") {
+		return agyHeldPowerShell(l.id, l.bin, prog)
+	}
 	switch kind {
 	case "fish":
 		q := fishQuote(prog)
@@ -368,7 +374,10 @@ var (
 // user's arguments (Args, flag then value: agy's --settings <file>), and
 // the model after Flag (none when Flag is ""); Model "" while it isn't on
 // magpie's, and it starts as it is. With one of Plain among the user's
-// arguments (alone or with "=value") it starts as it is too.
+// arguments (alone or with "=value") it starts as it is too. Hold, when
+// set, runs before the agent and its result after, so the agent is waited
+// on rather than taking magpie's place: agy without --settings has
+// magpie's settings in settings.json only while it runs.
 type Starting struct {
 	Bin   string
 	Env   []string
@@ -376,6 +385,7 @@ type Starting struct {
 	Model string
 	Flag  string
 	Plain []string
+	Hold  func() (func(), error)
 }
 
 // Plained says a is one of Plain, alone or with "=value".

@@ -800,7 +800,21 @@ func plugged(at place, p *agentplug.Agent) *Agent {
 		a.Start = func() Starting {
 			s := Starting{Bin: l.bin, Flag: l.flag, Plain: slices.Clone(l.plain)}
 			if m := magpieModel(); m != "" {
-				s.Env, s.Model, s.Args = l.vars(at.gw(), gkey()), m, slices.Clone(l.args)
+				s.Env, s.Model = l.vars(at.gw(), gkey()), m
+				if l.bin == "agy" && !AgySettingsFlag("agy") {
+					over := ""
+					for i := 0; i+1 < len(l.args); i += 2 {
+						if l.args[i] == "--settings" {
+							over = l.args[i+1]
+						}
+					}
+					if bf != nil && over != "" {
+						user := bf.path
+						s.Hold = func() (func(), error) { return agyHold(user, over) }
+					}
+				} else {
+					s.Args = slices.Clone(l.args)
+				}
 			}
 			return s
 		}
