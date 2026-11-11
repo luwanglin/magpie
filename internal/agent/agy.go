@@ -25,6 +25,18 @@ package agent
 // stays the user's, and a plain agy, and `agy remote-control` or
 // --remote-control through the function, run on their Google sign-in.
 //
+// agy 1.4.8 dropped --settings. Its --help no longer lists the flag, and
+// starting it with one fails ("flag provided but not defined: -settings");
+// the only settings file is settings.json. When the agy on PATH is one of
+// those (AgySettingsFlag), the launch is `magpie agy run` and that run
+// puts magpie's model, provider and custom models into settings.json for
+// the process, then writes the user's file back (agyHold). A second run
+// shares the file. One that died is put back by the next, from the copy
+// kept beside it. A plain agy, and remote control, still see the user's
+// file while none of those runs. A distro has no magpie to do it, so its
+// function asks `agy --help` and, when the flag is gone, does the same
+// with the applied file writeOver keeps.
+//
 // So that typing agy just works (bestony on Discord: the command was
 // copied at each start), magpie puts a function named agy in the profile
 // of each shell the user has, between "# >>> magpie agy >>>" and
@@ -63,6 +75,9 @@ const agyModels = "customModelsConfig.customModels"
 // (x-goog-api-key) alone. A command copied before, with the plain token,
 // still reaches magpie.
 func AgyLaunch(model string) string {
+	if !AgySettingsFlag("agy") {
+		return agyHeldLaunch(gateway.URL(), agentKey("agy"), model, runtime.GOOS == "windows")
+	}
 	return agyLaunchAt(gateway.URL(), agentKey("agy"), agySettingsFile(), model, runtime.GOOS == "windows")
 }
 
@@ -111,6 +126,9 @@ func agyFunction(kind, prog string) string {
 		q := "'" + strings.NewReplacer(`\`, `\\`, "'", `\'`).Replace(prog) + "'"
 		return "function agy\n    if test -x " + q + "\n        " + q + " agy run $argv\n    else\n        command agy $argv\n    end\nend"
 	case "powershell":
+		if !AgySettingsFlag("agy") {
+			return agyHeldPowerShell("agy", "agy", prog)
+		}
 		q := "'" + strings.ReplaceAll(prog, "'", "''") + "'"
 		return `function agy {
     $real = Get-Command agy -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -198,8 +216,10 @@ func agyDistroFunction(kind, key, gw string) string {
 			"    for a in $argv\n        switch $a\n            case 'remote-control' '--remote-control' '-remote-control' '--remote-control=*'\n                command agy $argv\n                return\n        end\n    end\n" +
 			"    for a in $argv\n        switch $a\n            case '--model' '--model=*' '-model' '-model=*'\n                set m ''\n        end\n    end\n" +
 			"    if test -n \"$m\"\n        set argv --model $m $argv\n    end\n" +
-			"    set argv --settings " + settings + " $argv\n" +
-			"    env GEMINI_API_KEY=" + fq(key) + " GOOGLE_GEMINI_BASE_URL=" + fq(gw) + " agy $argv\nend"
+			agyDistroFishSettings(settings) +
+			"    env GEMINI_API_KEY=" + fq(key) + " GOOGLE_GEMINI_BASE_URL=" + fq(gw) + " agy $argv\n" +
+			agyDistroFishRelease() +
+			"end"
 	}
 	return agyPosixHead +
 		"  local m a\n" +
@@ -208,8 +228,10 @@ func agyDistroFunction(kind, key, gw string) string {
 		`  for a in "$@"; do case "$a" in remote-control|--remote-control|--remote-control=*|-remote-control) command agy "$@"; return;; esac; done` + "\n" +
 		`  for a in "$@"; do case "$a" in --model|--model=*|-model|-model=*) m=;; esac; done` + "\n" +
 		`  if [ -n "$m" ]; then set -- --model "$m" "$@"; fi` + "\n" +
-		"  set -- --settings " + settings + ` "$@"` + "\n" +
-		"  GEMINI_API_KEY=" + q(key) + " GOOGLE_GEMINI_BASE_URL=" + q(gw) + ` command agy "$@"` + "\n}"
+		agyDistroPosixSettings(settings) +
+		"  GEMINI_API_KEY=" + q(key) + " GOOGLE_GEMINI_BASE_URL=" + q(gw) + ` command agy "$@"` + "\n" +
+		agyDistroPosixRelease() +
+		"}"
 }
 
 // agyCustom reads customModels as it is, raw JSON by key.
@@ -273,11 +295,19 @@ func agyIn(at place) *Agent {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
-		return edit.SetJSON(over, edit.KV{Path: "modelProvider", Value: "gemini"}, edit.KV{Path: "model", Value: model}, edit.KV{Path: agyModels, Value: ms})
+		if err := edit.SetJSON(over, edit.KV{Path: "modelProvider", Value: "gemini"}, edit.KV{Path: "model", Value: model}, edit.KV{Path: agyModels, Value: ms}); err != nil {
+			return err
+		}
+		// the distro's function has no magpie to merge at launch, so the
+		// file it copies when agy has no --settings is this: the user's
+		// settings plus magpie's, as of this write
+		return agyWriteApplied(path, over)
 	}
 	dropOver := func() error {
-		if err := os.Remove(over); err != nil && !os.IsNotExist(err) {
-			return err
+		for _, p := range []string{over, agyAppliedPath(over)} {
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				return err
+			}
 		}
 		return nil
 	}
@@ -352,7 +382,12 @@ func agyIn(at place) *Agent {
 			s := Starting{Bin: "agy", Flag: "--model", Plain: agyPlain}
 			if v := overModel(); usesMagpie(v) {
 				s.Env, s.Model = []string{"GEMINI_API_KEY=" + key(), "GOOGLE_GEMINI_BASE_URL=" + gw()}, v
-				s.Args = []string{"--settings", at.native(over)}
+				if AgySettingsFlag("agy") {
+					s.Args = []string{"--settings", at.native(over)}
+				} else {
+					user, file := path, over
+					s.Hold = func() (func(), error) { return agyHold(user, file) }
+				}
 			}
 			return s
 		},

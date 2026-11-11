@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yetone/magpie/internal/agent"
 	"github.com/yetone/magpie/internal/gateway"
 )
 
@@ -102,5 +103,77 @@ func TestAgyRun(t *testing.T) {
 	startLook = func(string) (string, error) { return "", errors.New("not found") }
 	if _, err := runOut(t, "agy", "run"); err == nil || !strings.Contains(err.Error(), "isn't installed") {
 		t.Fatalf("no agy: %v", err)
+	}
+}
+
+// agy 1.4.8 has no --settings. magpie agy run puts magpie's settings into
+// settings.json for the process and puts the user's file back after, and
+// remote control still starts agy as it is.
+func TestAgyRunHoldsSettingsWhenTheFlagIsGone(t *testing.T) {
+	prev := agent.AgySettingsFlag
+	agent.AgySettingsFlag = func(string) bool { return false }
+	t.Cleanup(func() { agent.AgySettingsFlag = prev })
+	home := helpHome(t)
+	dir := filepath.Join(home, ".gemini", "antigravity-cli")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	user := filepath.Join(dir, "settings.json")
+	over := filepath.Join(dir, "magpie-settings.json")
+	orig := "{\n  \"model\": \"mine\",\n  \"trustedWorkspaces\": [\"/w\"]\n}\n"
+	if err := os.WriteFile(user, []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(over, []byte("{\n  \"model\": \"magpie/deepseek/pro\",\n  \"modelProvider\": \"gemini\"\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	var during string
+	held := false
+	oldWait, oldExec, oldLook := startHeldRun, startExec, startLook
+	t.Cleanup(func() { startHeldRun, startExec, startLook = oldWait, oldExec, oldLook })
+	startHeldRun = func(_ string, args, _ []string) error {
+		held = true
+		got = append([]string(nil), args...)
+		b, _ := os.ReadFile(user)
+		during = string(b)
+		return nil
+	}
+	startExec = func(_, _ string, args, _ []string) error {
+		held = false
+		got = append([]string(nil), args...)
+		return nil
+	}
+	startLook = func(b string) (string, error) {
+		if b != "agy" {
+			return "", errors.New(b)
+		}
+		return filepath.Join(home, "agy"), nil
+	}
+	if _, err := runOut(t, "agy", "run", "-p", "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if !held || !slices.Equal(got, []string{"--model", "magpie/deepseek/pro", "-p", "hi"}) {
+		t.Fatalf("held %v args %v", held, got)
+	}
+	if !strings.Contains(during, `"modelProvider": "gemini"`) || !strings.Contains(during, "/w") {
+		t.Fatalf("during:\n%s", during)
+	}
+	if b, _ := os.ReadFile(user); string(b) != orig {
+		t.Fatalf("after:\n%s", b)
+	}
+	out, err := runOut(t, "agy", "env")
+	if err != nil || strings.Contains(out, "settings=") || !strings.Contains(out, "model=magpie/deepseek/pro\n") {
+		t.Fatalf("env: %q %v", out, err)
+	}
+	during = "untouched"
+	if _, err := runOut(t, "agy", "run", "--remote-control"); err != nil {
+		t.Fatal(err)
+	}
+	if held || !slices.Equal(got, []string{"--remote-control"}) || during != "untouched" {
+		t.Fatalf("remote control held=%v args=%v during=%q", held, got, during)
+	}
+	if b, _ := os.ReadFile(user); string(b) != orig {
+		t.Fatalf("remote control wrote settings:\n%s", b)
 	}
 }

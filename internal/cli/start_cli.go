@@ -22,7 +22,8 @@ import (
 // agent's, --help too. `magpie <agent> env` prints those variables, the
 // value of each flag it is started with (settings=<file> for --settings)
 // and the model, one NAME=value a line and nothing off magpie, for
-// PowerShell's function.
+// PowerShell's function. agy without --settings has no such flag: Hold
+// puts magpie's settings into settings.json for the process instead.
 
 func startUsage(id string, s agent.Starting) string {
 	vars := strings.Join(s.Names(), ", ")
@@ -85,6 +86,11 @@ func startCmd(args []string) (ok bool, err error) {
 // place of magpie where the system can (start_exec_*.go); tests set it.
 var startExec = startExecOS
 
+// startHeldRun waits for the agent so Starting.Hold can finish after it.
+// It is how claude is started: the same process group, the terminal's
+// signals, and the agent's exit code. Tests set it.
+var startHeldRun = claudeRunOS
+
 // startLook is the command on PATH; tests set it.
 var startLook = proc.Look
 
@@ -100,6 +106,7 @@ func startRun(s agent.Starting, args []string) error {
 	if slices.ContainsFunc(args, s.Plained) {
 		s.Model = ""
 	}
+	var release func()
 	if s.Model != "" {
 		names := s.Names()
 		env = slices.DeleteFunc(env, func(kv string) bool {
@@ -111,6 +118,16 @@ func startRun(s agent.Starting, args []string) error {
 			args = append([]string{s.Flag, s.Model}, args...)
 		}
 		args = append(slices.Clone(s.Args), args...)
+		if s.Hold != nil {
+			release, err = s.Hold()
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if release != nil {
+		defer release()
+		return startHeldRun(path, args, env)
 	}
 	return startExec(path, s.Bin, args, env)
 }

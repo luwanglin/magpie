@@ -1618,7 +1618,9 @@ shell profile. Beside `launch`:
   magpie's members of, written beside the user's own and taken out alone
   (`["customModelsConfig.customModels"]`);
 - `launch.args`: flags put before the user's arguments, each `{config}`,
-  the config's path (`{ "--settings": "{config}" }`); `launch.plain`:
+  the config's path (`{ "--settings": "{config}" }`). agy's `--settings`
+  is left off when that agy has no such flag, and `magpie agy run` holds
+  `settings.json` for the process instead (agent-wiring). `launch.plain`:
   arguments that start the agent as it is, never on the gateway
   (`["remote-control"]`);
 - `base`: for a config handed over by `launch.args`, so magpie's own
