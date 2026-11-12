@@ -1084,7 +1084,11 @@ at `/v2/models`.
 Alibaba's Token Plan is sold in two places, each with its own `sk-sp-` key
 that only its own host takes: on the Qwen AI platform as `qwen-token-plan`
 (`token-plan.maas.qianwenaiapi.com`), and on Alibaba Cloud Bailian as
-`bailian-token-plan` (`token-plan.cn-beijing.maas.aliyuncs.com`). Both serve
+`bailian-token-plan` (`token-plan.cn-beijing.maas.aliyuncs.com`). Alibaba Cloud's international
+plan is `alibaba-token-plan` (`token-plan.ap-southeast-1.maas.aliyuncs.com`),
+and the two at aliyuncs.com show the plan's windows on the Usage page once the
+provider's editor is given the Alibaba Cloud account's AccessKey ID and Secret
+(the `sk-sp-` key cannot read them). All serve
 Chat Completions at `/compatible-mode/v1` and Anthropic Messages at
 `/apps/anthropic`, and carry the plans' documented text models for when the
 host lists none. Bailian's also answers its decision model,
@@ -1953,6 +1957,7 @@ magpie model api relay/claude-opus-5-5 relay/claude-sonnet-5 anthropic   # sever
 magpie model api relay/gpt-5.5 --reset                          # auto again: the vendor's list and every URL
 magpie model apis                                               # the models you set an API for
 magpie model apis relay                                         # each of relay's models and its API
+magpie model tier relay/gpt-5.5 ultrafast                      # fast, ultrafast or usual: the speed every request for it is sent at
 ```
 
 It is saved as the editor's Save saves it (`provider.SetModelPrefs`, into

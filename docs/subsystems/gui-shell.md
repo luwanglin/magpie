@@ -811,6 +811,25 @@ that one keeps serving the agents and the Quit goes on).
   Ask before quitting (`#quitAskRow`, the app's only) shows it as On/Off
   and saves `quitNoAsk` through `POST /api/settings`, which keeps it when a
   page doesn't send it.
+- Put agents back when quitting (tudjam17795 on X: after magpie quits,
+  the harness it was connected to can't go on) is Settings › General ›
+  `#restoreQuitRow`, the app's only, Off by default: a connected agent
+  keeps magpie as it quits, which is what this page's question names. On
+  (`settings.RestoreOnQuit`, `restoreOnQuit`), `OnShutdown` runs
+  `agent.RestoreOnQuit` over the agents with magpie in their config
+  (`restoreAgentsOnQuit`), only when this process serves the gateway: each
+  agent's own `Disconnect`, so its files come back as they were before
+  magpie, `*.before-magpie` byte for byte. Unlike the Disconnect button it
+  leaves no `.disconnected` mark, and it records the ids it put back in the
+  stash (`quit.restored`). The next start (`rewireAgentsOnStart`, unless
+  the gateway is paused) connects exactly those again
+  (`agent.RewireOnStart`, once: the record is taken out first), skipping
+  one the user disconnected meanwhile (the mark) or connected by hand. An
+  agent the user disconnected before the quit is neither touched nor
+  connected again. `quitAtOnce` quits without asking while it is on, as
+  nothing is left to cut off. `TestRestoreOnQuitAndRewireOnStart`,
+  `TestRestoreOnQuitLeavesUserDisconnected`, `TestRestoreAgentsOnQuit`,
+  `TestRestoreOnQuitKeptUnlessSent` and `restore-on-quit.test.cjs`.
 - Not asked: a restart to update, Uninstall, a browser's page (`magpie
   web`), logging out or shutting down, and the Dock's Quit (AppKit's
   `terminate:`).
@@ -1209,3 +1228,5 @@ still follows the existing Not set up folding rules. The dialog explains that
 restoring visibility does not pin an unconfigured agent into the main list.
 See `agent-bulk-visibility.test.cjs` for persistence, partial selection, failed
 saves, narrow layouts and all five languages in Chromium and WebKit.
+
+- A gateway port another program holds names that program (pluoki on X). `gateway.NoteHeld` reads the holder with `proc.PortHolder` (lsof on the Mac, /proc on Linux, Get-NetTCPConnection on Windows) and, when the daemon is root's and unreadable, falls back to `tailscale serve status --json` for the port. Tailscale's line carries `tailscale serve --https=<other> http://127.0.0.1:<port>`. The sentence (`PortHeld.Sentence`) goes to the `magpie serve` standby line and bind error, the app's log, `gatewayHeld` in `/api/state` (Gateway page) and Start's `taken` answer. A holder that can't be read says nothing, and the old wording stands. Nothing is killed or touched. See `TestWhoHolds`, `TestListenErrorNamesTheHolder`, `TestPortHolderNamesTheProgram` and `gateway-port-holder.test.cjs`.

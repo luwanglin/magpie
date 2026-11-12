@@ -70,7 +70,9 @@ type Provider struct {
 	// key (TakesVolcAccessKey), what Ark tells its Coding or Agent Plan's
 	// windows to (volcengine_usage.go), or a Tencent Cloud account's API
 	// key, its SecretId and SecretKey (TakesTencentAccessKey), what TokenHub
-	// tells Token Plan 企业版's usage to (tencent_usage.go); not the plan's
+	// tells Token Plan 企业版's usage to (tencent_usage.go), or an Alibaba
+	// Cloud account's AccessKey ID and Secret (TakesAlibabaAccessKey), what
+	// its console tells a Token Plan's usage to (alibaba_usage.go); not the plan's
 	// inference key in Key. They are kept, backed up and synced as the keys are: the Secret
 	// is never sent to the GUI, and a backup without keys has neither.
 	AccessKeyID     string `json:"accessKeyID,omitempty"`
@@ -584,6 +586,9 @@ type Provider struct {
 	// no body, for an endpoint that answers only a POST (#2368). Any other
 	// is refused when the balance is read (balanceMethodOf).
 	BalanceMethod string `json:"balanceMethod,omitempty"`
+	// NoBalanceProbe turns off the look for a balance query on a relay
+	// added with no Balance URL (balance_probe.go).
+	NoBalanceProbe bool `json:"noBalanceProbe,omitempty"`
 	// BalanceToken is what a vendor tells the whole account's balance to,
 	// where a key is told only what is left on itself: AiHubMix's system
 	// access token, or a new-api relay's for its /api/user/self named in

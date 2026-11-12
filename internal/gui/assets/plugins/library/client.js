@@ -441,7 +441,7 @@ magpie.plugin("library", (ctx) => {
   // What All did, said of the item: on for how many of the agents it went
   // to, and which of them couldn't be given it, and why.
   function reportAll(v, me) {
-    const what = ({ servers: "mcp:", hooks: "hook:", subagents: "subagent:" }[me.list] || "skill:") + me.name;
+    const what = ({ servers: "mcp:", hooks: "hook:", env: "env:", subagents: "subagent:" }[me.list] || "skill:") + me.name;
     const shown = [...me.box.children].filter((x) => x.dataset.agent && !cannot(x)).map((x) => x.dataset.agent);
     const n = shown.filter((id) => me.want.includes(id)).length;
     const bad = (v.result?.problems || []).filter((p) => p.what === what && shown.includes(p.agent));
@@ -703,7 +703,7 @@ magpie.plugin("library", (ctx) => {
       ul.append(li);
     }
     if (ul.childElementCount) card.append(ul);
-    const tabNames = { instructions: t("Instructions"), mcp: t("MCP servers"), skills: t("Skills"), hooks: t("Hooks"), subagents: t("Subagents"), plugins: t("Claude plugins") };
+    const tabNames = { instructions: t("Instructions"), mcp: t("MCP servers"), skills: t("Skills"), hooks: t("Hooks"), env: t("Variables"), subagents: t("Subagents"), plugins: t("Claude plugins") };
     const others = Object.keys(away).filter((k) => k in tabNames);
     if (others.length) {
       const more = el("div", "lib-problems-away");
@@ -739,7 +739,7 @@ magpie.plugin("library", (ctx) => {
   }
   // the tab a problem is about; "" is one shown on every tab
   function problemTab(what) {
-    return { instructions: "instructions", mcp: "mcp", skill: "skills", skills: "skills", project: "skills", hook: "hooks", hooks: "hooks", subagent: "subagents", plugin: "plugins" }[what.split(":")[0]] || "";
+    return { instructions: "instructions", mcp: "mcp", skill: "skills", skills: "skills", project: "skills", hook: "hooks", hooks: "hooks", env: "env", subagent: "subagents", plugin: "plugins" }[what.split(":")[0]] || "";
   }
   function problemWhat(what) {
     const [kind, ...rest] = what.split(":");
@@ -851,6 +851,7 @@ magpie.plugin("library", (ctx) => {
       ["mcp", t("MCP servers") + n("mcp")],
       ["skills", t("Skills") + n("skills")],
       ["hooks", t("Hooks") + n("hooks")],
+      ["env", t("Variables") + n("env")],
       ["subagents", t("Subagents") + n("subagents")],
       ["plugins", t("Claude plugins") + n("plugins")],
       ["rtk", "RTK"],
@@ -911,7 +912,7 @@ magpie.plugin("library", (ctx) => {
     if (agentless()) tab = "mcp";
     // Pi's tab only while a Pi is here; the pick is kept for when one is
     else if (tab === "pi" && !hasPi()) tab = "instructions";
-    const head = libHead({ mcp: lib.servers.length, skills: lib.skills.length, hooks: (lib.hooks || []).length, subagents: (lib.subagents || []).length, plugins: (lib.plugins || []).length });
+    const head = libHead({ mcp: lib.servers.length, skills: lib.skills.length, hooks: (lib.hooks || []).length, env: (lib.env || []).length, subagents: (lib.subagents || []).length, plugins: (lib.plugins || []).length });
     page.append(head);
     head.classList.toggle("stuck", top > 0);
     // what changed in a tab is drawn in place: only another tab (or the
@@ -929,6 +930,7 @@ magpie.plugin("library", (ctx) => {
     else if (tab === "memory") renderMemory(body);
     else if (tab === "pi") renderPi(body);
     else if (tab === "hooks") renderHooks(body);
+    else if (tab === "env") renderEnv(body);
     else if (tab === "subagents") renderSubagents(body);
     else if (tab === "plugins") renderPlugins(body);
     else renderSkills(body);
@@ -965,7 +967,7 @@ magpie.plugin("library", (ctx) => {
     if (JSON.stringify(follow) !== JSON.stringify(was) && lib && page.isConnected) render();
   }
   function followNote() {
-    const part = tab === "memory" ? "memory" : ["instructions", "mcp", "skills", "hooks", "subagents", "plugins"].includes(tab) ? "library" : "";
+    const part = tab === "memory" ? "memory" : ["instructions", "mcp", "skills", "hooks", "env", "subagents", "plugins"].includes(tab) ? "library" : "";
     if (!part || !follow?.[part]) return null;
     const p = el("p", "lib-intro lib-follow", t("This computer follows the server: what you change here is replaced by the next sync.") + " ");
     const go = button(t("Sync settings"), "link", (e) => openSettingsAt(e, "sync", "#syncList .sync-follows"));
@@ -1823,7 +1825,7 @@ magpie.plugin("library", (ctx) => {
       row.append(sw);
       list.append(row);
     }
-    if (!rows.length) list.append(el("div", "lib-none", t("None of your agents can use billion-context with magpie: Pi, omp, OpenCode, Claude Code, Hermes or Zed.")));
+    if (!rows.length) list.append(el("div", "lib-none", t("None of your agents can use billion-context with magpie: Pi, omp, OpenCode, Claude Code, Hermes, DeepSeek Harness or Zed.")));
     body.append(list);
   }
   // What billion-context saved, in its own count: what its running proxy
@@ -3131,6 +3133,12 @@ magpie.plugin("library", (ctx) => {
       t("Servers your agents have that aren't in the library stay as they are."),
     ]);
   }
+  function confirmRemoveEnv(v) {
+    confirmRemoveOne("env", v.name, t("Remove the variable {name}?", { name: v.name }), [
+      takenFromOne(v),
+      t("Variables your agents have that aren't in the library stay as they are, and so does one you changed in an agent's file."),
+    ]);
+  }
   function confirmRemoveHook(h) {
     confirmRemoveOne("hooks", h.name, t("Remove the hook {name}?", { name: h.name }), [
       takenFromOne(h),
@@ -3486,11 +3494,15 @@ magpie.plugin("library", (ctx) => {
             draw();
             signMoved(name);
           }));
+      } else if (cur.accounts?.length > 1) {
+        // several sign-ins: the one in use is what every agent is given
+        box.append(acctList(cur.accounts.map((a) => ({ id: a.id, name: a.label || t("Account {n}", { n: cur.accounts.indexOf(a) + 1 }), on: a.active, bad: a.dead })), "signin", name, draw));
+        line.append(addSign(), el("span", "grow"), button(t("Sign out"), "", signOut));
       } else if (cur.signedIn && !cur.dead) {
-        line.append(tag(t("Signed in"), "lib-signed"), el("span", "note", t("The agents given it use magpie's sign-in")), el("span", "grow"), button(t("Sign out"), "", signOut));
+        line.append(tag(t("Signed in"), "lib-signed"), el("span", "note", t("The agents given it use magpie's sign-in")), el("span", "grow"), name ? addSign() : "", button(t("Sign out"), "", signOut));
       } else {
         if (cur.dead) line.append(tag(t("Sign-in ran out"), "warn"));
-        line.append(button(ready?.saves?.() ? t("Save and sign in") : cur.dead ? t("Sign in again") : t("Sign in"), "action", start));
+        line.append(button(ready?.saves?.() ? t("Save and sign in") : cur.dead ? t("Sign in again") : t("Sign in"), "action", () => start()));
       }
       box.append(line);
       // the browser didn't start (#2043): the page to open by hand, rather
@@ -3507,7 +3519,19 @@ magpie.plugin("library", (ctx) => {
       }
       if (sg?.state === "failed") box.append(el("div", "lib-signin-err", sg.error));
     };
-    async function start() {
+    // another sign-in to the server, called what the reader types
+    let adding = false;
+    function addSign() {
+      if (!adding) return button(t("＋ Add account"), "lib-addacct", () => { adding = true; draw(); box.querySelector(".lib-acct-new input")?.focus(); });
+      const f = el("span", "lib-acct-new");
+      const i = field2("", t("Name"), () => {});
+      i.maxLength = 60;
+      const go = () => { adding = false; start(i.value.trim()); };
+      i.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); e.stopPropagation(); go(); } });
+      f.append(i, button(t("Sign in"), "action", go), button(t("Cancel"), "", () => { adding = false; draw(); }));
+      return f;
+    }
+    async function start(label) {
       const was = name;
       mcpSigning = { name, state: "starting" };
       draw();
@@ -3519,7 +3543,7 @@ magpie.plugin("library", (ctx) => {
           name = saved;
           mcpSigning = { name, state: "starting" };
         }
-        const st = await api("library/mcp-signin", { name });
+        const st = await api("library/mcp-signin", typeof label === "string" ? { name, add: true, label } : { name });
         if (web && st.url) api("open", { url: st.url }).catch(() => {});
         mcpSigning = { ...st, name };
         draw();
@@ -3542,6 +3566,76 @@ magpie.plugin("library", (ctx) => {
     }
     box.redraw = draw;
     signDraw = { box, draw };
+    draw();
+    return box;
+  }
+
+  // the accounts of a server, one in use (Elorynth on X): a click on a row
+  // puts it in use, in place; every agent given the server follows. kind is
+  // "signin" for magpie's OAuth sign-ins, "header" for sets of headers
+  function acctList(rows, kind, name, redraw) {
+    const list = el("div", "lib-accts");
+    list.setAttribute("role", "radiogroup");
+    const call = async (op, id) => {
+      try {
+        take(await api("library/mcp-account", { name, kind, op, id }));
+        render();
+        redraw();
+      } catch (e) { status(e.message, "err", 6000); }
+    };
+    for (const r of rows) {
+      const row = el("div", "lib-acct" + (r.on ? " on" : ""));
+      const pick = el("button", "lib-acct-pick");
+      pick.setAttribute("role", "radio");
+      pick.setAttribute("aria-checked", r.on ? "true" : "false");
+      pick.append(el("span", "lib-acct-dot"), el("span", "lib-acct-name", r.name));
+      if (r.bad) pick.append(tag(t("Sign-in ran out"), "warn"));
+      pick.onclick = (e) => { e.stopPropagation(); if (!r.on) call("use", r.id); };
+      row.append(pick);
+      if (r.id !== "") {
+        const x = button("", "lib-x", () => call("remove", r.id));
+        x.append(svg("M4.5 4.5l7 7M11.5 4.5l-7 7", 11, 1.6));
+        x.title = t("Remove");
+        row.append(x);
+      }
+      list.append(row);
+    }
+    return list;
+  }
+  // Authorization headers a server can be asked with, besides its own
+  function headerAccounts(name) {
+    const box = el("div", "lib-hdr-accts");
+    let adding = false;
+    const draw = () => {
+      box.replaceChildren();
+      const s = lib.servers.find((x) => x.name === name);
+      if (!s) return;
+      const l = s.accounts || [];
+      if (l.length) {
+        box.append(acctList([{ id: "", name: t("Default"), on: !s.account }, ...l.map((a) => ({ id: a.id, name: a.name, on: a.id === s.account }))], "header", name, draw));
+      }
+      if (!adding) {
+        box.append(button(t("＋ Add account"), "lib-addacct", () => { adding = true; draw(); box.querySelector(".lib-acct-form input")?.focus(); }));
+        return;
+      }
+      const form = el("div", "lib-acct-form");
+      let label = "", headers = { Authorization: "" };
+      const add = async () => {
+        try {
+          take(await api("library/mcp-account", { name, kind: "header", op: "add", label, headers }));
+          adding = false;
+          render();
+          draw();
+        } catch (e) { status(e.message, "err", 6000); }
+      };
+      const n = field2("", t("Name"), (v) => { label = v; });
+      n.maxLength = 60;
+      form.append(n, pairs(headers, "Authorization", "Bearer …", (v) => { headers = v; }),
+        el("div", "lib-acct-act"), );
+      form.lastChild.append(button(t("Add"), "action", add), button(t("Cancel"), "", () => { adding = false; draw(); }));
+      box.append(form);
+    };
+    box.redraw = draw;
     draw();
     return box;
   }
@@ -3902,6 +3996,7 @@ magpie.plugin("library", (ctx) => {
         url.classList.add("mono");
         g.append(...field("URL", url));
         g.append(...field(t("Headers"), pairs(d.headers, "Authorization", "Bearer …", (v) => { d.headers = v; drawAgents(); }), refHint()));
+        if (s && s.transport === d.transport && s.url) g.append(...field(t("Accounts"), headerAccounts(s.name)));
         // Sign in saves the form first when it is of another server than
         // the saved one, so a URL just changed (or a server just added) is
         // the one signed in to
@@ -4058,6 +4153,89 @@ magpie.plugin("library", (ctx) => {
     ed.append(bar);
     modal = { save: () => go.click() };
     openLib(ed);
+  }
+
+  // ---------- variables ----------
+
+  // An environment variable the agent's own settings give every run of it
+  // (a proxy, an API base URL): Claude Code's settings.json "env", Codex's
+  // shell_environment_policy.set. It is kept once and written into each
+  // agent picked (env.go); a value the user set in the file is left alone.
+  const envAgentOf = (id) => (lib.envAgents || []).find((x) => x.id === id);
+  const envAgents = () => shownAgents().filter((a) => envAgentOf(a.id));
+  const envBlocked = () => (a) => {
+    const ea = envAgentOf(a.id);
+    if (ea && !ea.no) return "";
+    return ea?.wsl ? t("magpie gives variables only to agents on this computer, not yet to {agent} in WSL", { agent: a.name }) : t("{agent} has no environment settings magpie can write", { agent: a.name });
+  };
+  function renderEnv(body) {
+    body.append(intro(t("An environment variable is set for an agent every time it runs: a proxy, an API base URL. Add it once and magpie writes it into each agent you pick, in that agent's own settings.")));
+    const all = envAgents();
+    const vars = lib.env || [];
+    if (!vars.length) {
+      body.append(empty(t("No variables in the library yet"), t("Add one, and pick the agents that get it."), button(t("＋ Add a variable"), "action", () => editEnv(null))));
+      return;
+    }
+    const list = el("div", "list lib-list");
+    list.append(...[...vars].sort((a, b) => a.name.localeCompare(b.name)).map((v) => envRow(v, all)));
+    body.append(list);
+    const after = el("div", "after-list");
+    after.append(button(t("＋ Add variable"), "", () => editEnv(null)));
+    body.append(after);
+  }
+  function envRow(v, all) {
+    const row = el("div", "row lib-row click lib-env");
+    const who = el("div", "who");
+    who.append(el("div", "name mono", v.name));
+    const val = el("div", "sub mono lib-envval", v.value);
+    val.title = v.value;
+    who.append(val);
+    row.append(glyph(GLYPH.hook), who, ...removeAct(() => confirmRemoveEnv(v)),
+      agentChips(withGone(all, v.agents), v.agents, chipsChange("env/agents", v.name, "env", (x) => envRow(x, all)), { problems: v.problems, blocked: envBlocked(), all: true }));
+    row.onclick = () => editEnv(v);
+    row.title = t("Edit {name}", { name: v.name });
+    return row;
+  }
+  function editEnv(v) {
+    const all = envAgents();
+    const d = v ? { name: v.name, value: v.value, agents: [...(v.agents || [])] } : { name: "", value: "", agents: all.filter((a) => !envBlocked()(a)).map((a) => a.id) };
+    const ed = el("div", "editor lib-editor lib-envedit");
+    const head = el("div", "ehead");
+    head.append(glyph(GLYPH.hook), el("b", "", v ? v.name : t("New variable")));
+    ed.append(head);
+    const err = el("div", "editor-error");
+    const name = field2(d.name, t("e.g. HTTPS_PROXY"), (x) => { d.name = x.trim(); });
+    name.classList.add("mono");
+    ed.append(...field(t("Name"), name, t("Letters, digits and _")));
+    const val = field2(d.value, t("e.g. http://127.0.0.1:7890"), (x) => { d.value = x; });
+    val.classList.add("mono");
+    ed.append(...field(t("Value"), val));
+    const agentsBox = el("div");
+    ed.append(...field(t("Agents"), agentsBox), err);
+    const drawAgents = () => agentsBox.replaceChildren(agentChips(all, d.agents, (next) => { d.agents = next; drawAgents(); }, { names: true, blocked: envBlocked(), all: true }));
+    drawAgents();
+    const bar = el("div", "bar");
+    if (v) bar.append(button(t("Remove from the library"), "danger", async () => {
+      if (!await confirmRemoval(v.name, "It will be removed from the library and the agents it was given to.")) return;
+      if (await change("env/remove", { name: v.name }, t("{name} is out of the library and the agents it was given to", { name: v.name }))) closeLibModal(true);
+    }));
+    bar.append(el("span", "grow"), button(t("Cancel"), "", closeLibModal));
+    const save = async () => {
+      err.textContent = "";
+      try {
+        const env = { name: d.name, value: d.value, agents: d.agents.filter((id) => !envBlocked()(agentOf(id) || { id })) };
+        take(await api("library/env/save", { old: v ? v.name : "", env }));
+        report(lib.result, v ? t("{name} saved", { name: d.name }) : "");
+        closeLibModal(true);
+        render();
+      } catch (e) { err.textContent = e.message; }
+    };
+    bar.append(button(v ? t("Save") : t("Add"), "primary", save));
+    ed.append(bar);
+    const original = JSON.stringify(d);
+    modal = { save, dirty: () => JSON.stringify(d) !== original };
+    openLib(ed);
+    if (!v) requestAnimationFrame(() => name.focus());
   }
 
   // ---------- hooks ----------

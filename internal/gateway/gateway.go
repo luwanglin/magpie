@@ -607,7 +607,7 @@ type Server struct {
 	// minute, and those about to go (rpm.go)
 	rpms          rpms
 	requestLimits requestLimits
-	// what a restart would cut short (busy.go)
+	// what a restart would cut short (portbusy.go)
 	busyCounters
 	// every request's bytes up and down, as they go (Traffic)
 	traffic traffic
@@ -803,8 +803,15 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 	ln, err := s.listen(listenAddr())
 	if err != nil {
+		if addrInUse(err) {
+			// say who has it, when that can be read (portbusy.go)
+			if b, ok := NoteHeld(); ok {
+				return fmt.Errorf("%w (%s)", err, b.Sentence())
+			}
+		}
 		return err
 	}
+	ClearHeld()
 	s.lnMu.Lock()
 	s.ln = ln
 	s.lnMu.Unlock()
@@ -2004,7 +2011,7 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 				p, model, ok = provider.Resolve(to)
 			} else {
 				w, body = rw, b
-				r = withMaskedAs(r, ownMaskedAs())
+				r = withMaskedAs(r, ownMaskedAs(r.Context()))
 				defer done()
 			}
 		}
@@ -2428,6 +2435,11 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, from provider.Pro
 	if call.Kind == "" && factsOf(from, plain).compact {
 		call.Kind = KindCompact
 	}
+	// Claude Code's auto mode classifier and AgentSummary name themselves
+	// nowhere: told by their content, recorded as inferred
+	if call.Kind == "" {
+		call.Kind = inferredKind(r.Header, from, body)
+	}
 	// the reply counted as it reaches the agent, for the Routing page
 	// while it is out (#4951); learned from once it ends
 	capture.live = liveBegin(inflightOf(r.Context()), call.Model, from)
@@ -2715,7 +2727,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, from provider.Pro
 				move(to, movedPrivacy)
 			} else {
 				capture.ResponseWriter, body, unmask, maskedHits = rw, b, done, hits
-				r = withMaskedAs(r, ownMaskedAs())
+				r = withMaskedAs(r, ownMaskedAs(r.Context()))
 			}
 		}
 	}
@@ -3028,6 +3040,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, from provider.Pro
 			// (#954), as a group's member may be; its fallbacks, other
 			// models, go as they are
 			fastPick(cands, pl, p.ID, model, provider.IsUltraPick(agent, p.ID+"/"+model))
+		} else if tier := provider.ModelTier(p.ID, model); tier != "" {
+			// the speed the user gave the model in its Model settings, for
+			// every agent that has no pick of its own for it
+			fastPick(cands, pl, p.ID, model, tier == "ultrafast")
 		}
 	}
 	agentPick := provider.AgentEffort(agent)
@@ -8093,7 +8109,12 @@ func (s *Server) forwardTranslated(ctx context.Context, p provider.Provider, to 
 		// the model gives (fillsOutput), unless it turned the one filled
 		// in away before
 		if req.MaxTokens <= 0 && fillsOutput(p, to) && (to == provider.Anthropic || s.fits(p.ID, outputFillRefused(model), to)) {
-			if n := askedOutput(p, model); n > 0 {
+			n := askedOutput(p, model)
+			if to != provider.Anthropic {
+				// the window holds the prompt and the reply together
+				n = roomedOutput(n, contextOf(p, model), estimate(req))
+			}
+			if n > 0 {
 				r := *req
 				r.MaxTokens, req = n, &r
 				filledOutput = to != provider.Anthropic
@@ -9634,7 +9655,7 @@ func render(proto provider.Protocol, res Result, r *Request) []byte {
 // custom provider.
 func dashScope(p provider.Provider) bool {
 	switch p.VendorPreset() {
-	case "qwen", "qwen-cn", "qwen-token-plan", "bailian-token-plan", "qwencloud", "qwencloud-token-plan":
+	case "qwen", "qwen-cn", "qwen-token-plan", "bailian-token-plan", "alibaba-token-plan", "qwencloud", "qwencloud-token-plan":
 		return true
 	}
 	h := p.VendorHost()

@@ -260,6 +260,13 @@ database gives it, so `Titles` looks a `zcode:` key up under both and
 answers under the id asked for (#5195). Verification:
 `TestZCodeTitlesByRequestID`.
 
+The calls read from ZCode's database name their session the same way
+(`readZCodeCalls`, `zcodeBareID`). The Usage page pairs a gateway record with
+the session file's call by session, tokens and end time, so under `sess_…` a
+call magpie had routed was counted again as a local session's whatever
+provider id ZCode wrote beside it (nori_tsukiji on X). Verification:
+`TestZCodeCallsPairWithTheGatewaysRecords`.
+
 A ZCode session's name is the app's: its task index
 (`v2/tasks-index.sqlite` in the data folder, `tasks.title` by `task_id`,
 the session's id) holds what the app shows and what the user renamed it to,
@@ -322,6 +329,14 @@ list the session), and `HasGatewayConversations` counts it.
 Implementation: [`internal/sessions/gateway_delete.go`](../../internal/sessions/gateway_delete.go),
 `Restore` in [`internal/sessions/manage.go`](../../internal/sessions/manage.go), and
 [`internal/gui/sessions_manage.go`](../../internal/gui/sessions_manage.go).
+An agent whose sessions magpie cannot delete (OpenCode, Cline, Grok, Kimi, Hermes:
+rows in the agent's own database or store) and whose command is no longer on
+PATH (`cliGone`) is forgettable (_SekiBetu_ on X): its rows get Delete, which
+only hides them through the same hidden list (`sessions.Forget`, trash note
+marked `forgot`; the agent's own files are not touched), and no Resume
+(`resumeFor`). Restore unhides. With the command installed nothing changes.
+Tests: `TestUninstalledAgentSessionsAreForgotten`,
+`TestManageDeleteOfAnUninstalledAgentTakesItOffTheList`, `sessions-forget.test.cjs`.
 A deleted Codex session also leaves the Codex app's list (zhuddan on Discord).
 The app (ChatGPT.app's Codex, 26.x) lists threads from its own catalog,
 `<CODEX_HOME>/sqlite/codex.db` (`codex-dev.db` for a non-prod build), table
@@ -973,6 +988,27 @@ arguments are never kept, not even masked.
   server, the Requested cell the tool, and the status Succeeded or
   Failed. The Purpose filter names `kind:mcp` "MCP tool"
   (`purposeKinds`, `purposes.js`).
+
+### Claude Code's helper requests and the largest cache write
+
+Claude Code's AgentSummary ("Describe your most recent action in 3-5
+words.") and its auto mode classifier name themselves nowhere in the
+request, so `inferredKind` (observe.go) tells them by their content, for
+a `claude-cli/` request on the Messages API only, and the ledger row's
+Kind is `agent_summary_inferred` or `auto_mode_check_inferred`
+(`usage.InferredSuffix`). The name says "(inferred)"; both spellings share
+the plain kind's purpose, which a client marker would use. Anything else
+stays unmarked.
+
+A requests page also holds `BigWrite` (big_write.go): the gateway-served
+row that wrote the most to the cache, kept per chunk (`chunkPart.big`) and
+merged as the cells are. Rows read from session files have no request to
+open and are left out. The Requests line shows it as a button that opens
+that request (`openUsageRoute`). The counting is keyed by
+`settledCountVersion`. `TestRequestPageBigWrite`,
+`TestClaudeHelperRequestsAreLabelled` and `usage-big-write.test.cjs`
+cover it. The per-request branch recovery result asked for in #6199 is not
+recorded: no structured field holds it.
 
 `TestMCPToolCallIsARequestRow`, `TestMCPHubCallIsARequestRow`,
 `TestMCPCalledFromStdioIsARow` and the others in `mcp_calls_test.go`,
